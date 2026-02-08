@@ -1,31 +1,39 @@
 import streamlit as st
 import google.generativeai as genai
 import cv2
-import os
 import tempfile
+import os
 from PIL import Image
 
-# ---------------- Page Config ----------------
+# -------------------------------------------------
+# 1. Page Configuration
+# -------------------------------------------------
 st.set_page_config(
     page_title="Lazy QA | AI Bug Reporter",
     page_icon="🐞",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("## 🐞 The Lazy QA Agent")
 st.caption("Automated bug reporting powered by multimodal AI")
 
-# ---------------- Sidebar ----------------
+# -------------------------------------------------
+# 2. Sidebar (API Key)
+# -------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.secrets.get("GOOGLE_API_KEY") or st.text_input(
         "Google Gemini API Key", type="password"
     )
 
-# ---------------- UI ----------------
+# -------------------------------------------------
+# 3. UI Layout
+# -------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
+    st.subheader("📹 Input Source")
     uploaded_video = st.file_uploader(
         "Upload Screen Recording",
         type=["mp4", "mov", "avi"]
@@ -38,71 +46,108 @@ with col2:
 
     if uploaded_video and st.button("Generate JIRA Ticket ✨"):
         if not api_key:
-            st.error("API key missing")
+            st.error("Please provide a Google API key.")
             st.stop()
 
         genai.configure(api_key=api_key)
 
-        with st.status("🚀 Agent working...", expanded=True) as status:
+        try:
+            with st.status("🚀 Agent working...", expanded=True) as status:
 
-            # ---------- Save video ----------
-            status.write("📥 Saving video...")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-                temp.write(uploaded_video.read())
-                video_path = temp.name
+                # -----------------------------------------
+                # Save video temporarily
+                # -----------------------------------------
+                status.write("📥 Saving video...")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+                    tmp.write(uploaded_video.read())
+                    video_path = tmp.name
 
-            # ---------- Extract frames ----------
-            status.write("🎞️ Extracting key frames...")
-            cap = cv2.VideoCapture(video_path)
-            frames = []
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
+                # -----------------------------------------
+                # Extract key frames (1 frame per second)
+                # -----------------------------------------
+                status.write("🎞️ Extracting key frames...")
+                cap = cv2.VideoCapture(video_path)
+                fps = int(cap.get(cv2.CAP_PROP_FPS)) or 1
+                frames = []
 
-            frame_count = 0
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                frame_index = 0
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-                # Take 1 frame per second
-                if frame_count % fps == 0:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frames.append(Image.fromarray(frame_rgb))
+                    if frame_index % fps == 0:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frames.append(Image.fromarray(rgb))
 
-                frame_count += 1
-                if len(frames) >= 6:
-                    break
+                    frame_index += 1
+                    if len(frames) >= 6:
+                        break
 
-            cap.release()
-            os.remove(video_path)
+                cap.release()
+                os.remove(video_path)
 
-            # ---------- Gemini Vision ----------
-            status.write("🧠 Analyzing UI behavior...")
-            model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+                if not frames:
+                    st.error("No frames could be extracted from the video.")
+                    st.stop()
 
-            prompt = """
+                # -----------------------------------------
+                # Gemini Vision (CORRECT MODEL)
+                # -----------------------------------------
+                status.write("🧠 Analyzing UI behavior and bug patterns...")
+                model = genai.GenerativeModel(
+                    "models/gemini-1.0-pro-vision"
+                )
+
+                prompt = """
 You are a Senior QA Automation Engineer.
 
-The images represent key UI states from a screen recording that contains a software bug.
+The images represent key UI states from a screen recording
+that demonstrates a software bug.
 
-Generate a PROFESSIONAL JIRA BUG REPORT in Markdown.
+Generate a PROFESSIONAL, ENGINEERING-GRADE JIRA BUG REPORT
+in Markdown format.
 
 Structure:
+
 ## 🐛 Bug Report
-**Title:**
-**Severity:**
+**Title:** Concise technical title
+**Severity:** Critical / High / Medium / Low
 
 ### 📝 Description
+Brief explanation of the issue.
+
 ### 👣 Steps to Reproduce
+1. Step 1 observed in UI
+2. Step 2 observed in UI
+3. Step 3 observed in UI
+
 ### 🔍 Technical Analysis
-- Observed Behavior
-- Expected Behavior
-- Potential Root Cause
+- **Observed Behavior**
+- **Expected Behavior**
+- **Potential Root Cause**
+
+---
+*Generated by Lazy QA Agent*
 """
 
-            response = model.generate_content([prompt, *frames])
+                response = model.generate_content(
+                    [prompt, *frames]
+                )
 
-            status.update(label="✅ Done", state="complete")
+                status.update(
+                    label="✅ Analysis complete",
+                    state="complete",
+                    expanded=False
+                )
 
-        st.markdown("### 📄 Generated JIRA Ticket")
-        st.markdown(response.text)
-        st.code(response.text, language="markdown")
+            # -----------------------------------------
+            # Display Result
+            # -----------------------------------------
+            st.markdown("### 📄 Generated JIRA Ticket")
+            st.markdown(response.text)
+            st.code(response.text, language="markdown")
+
+        except Exception as e:
+            st.error("An unexpected error occurred.")
+            st.exception(e)
