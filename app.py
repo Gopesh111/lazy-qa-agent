@@ -1,200 +1,108 @@
 import streamlit as st
 import google.generativeai as genai
-import time
-from tempfile import NamedTemporaryFile
+import cv2
 import os
+import tempfile
+from PIL import Image
 
-# --------------------------------------------------
-# 1. Page Configuration (MUST be first)
-# --------------------------------------------------
+# ---------------- Page Config ----------------
 st.set_page_config(
     page_title="Lazy QA | AI Bug Reporter",
     page_icon="🐞",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
-# --------------------------------------------------
-# 2. Custom CSS
-# --------------------------------------------------
-st.markdown("""
-<style>
-.title-text {
-    background: -webkit-linear-gradient(45deg, #00FF94, #00B8FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-weight: bold;
-    font-size: 3em;
-    padding-bottom: 20px;
-}
+st.markdown("## 🐞 The Lazy QA Agent")
+st.caption("Automated bug reporting powered by multimodal AI")
 
-.stButton>button {
-    background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
-    color: black;
-    border: none;
-    padding: 15px 30px;
-    border-radius: 12px;
-    font-weight: bold;
-    width: 100%;
-}
-
-.report-container {
-    background-color: #262730;
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid #41444C;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# 3. Sidebar (API Key)
-# --------------------------------------------------
+# ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("⚙️ Configuration")
-
-    if "GOOGLE_API_KEY" in st.secrets:
-        api_key = st.secrets["GOOGLE_API_KEY"]
-        st.success("✅ API Key Loaded")
-    else:
-        api_key = st.text_input("Enter Google Gemini API Key", type="password")
-
-    st.markdown("---")
-    st.info(
-        "💡 **How it works:**\n"
-        "1. Upload a screen recording\n"
-        "2. AI analyzes the bug visually\n"
-        "3. JIRA ticket is generated automatically"
+    api_key = st.secrets.get("GOOGLE_API_KEY") or st.text_input(
+        "Google Gemini API Key", type="password"
     )
 
-# --------------------------------------------------
-# 4. Main UI
-# --------------------------------------------------
-st.markdown('<p class="title-text">🐞 The Lazy QA Agent</p>', unsafe_allow_html=True)
-st.caption("🚀 Automated bug reporting powered by multimodal AI")
-
+# ---------------- UI ----------------
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📹 Input Source")
-    uploaded_file = st.file_uploader(
+    uploaded_video = st.file_uploader(
         "Upload Screen Recording",
         type=["mp4", "mov", "avi"]
     )
-
-    if uploaded_file:
-        st.video(uploaded_file)
+    if uploaded_video:
+        st.video(uploaded_video)
 
 with col2:
     st.subheader("🤖 AI Analysis")
-    result_container = st.empty()
 
-    if uploaded_file and st.button("Generate JIRA Ticket ✨"):
+    if uploaded_video and st.button("Generate JIRA Ticket ✨"):
         if not api_key:
-            st.error("Please provide a Google API key.")
-            st.stop()
-
-        # --------------------------------------------------
-        # Safety: File size guard (important on Streamlit Cloud)
-        # --------------------------------------------------
-        if uploaded_file.size > 25 * 1024 * 1024:
-            st.error("Please upload a video under 25MB.")
+            st.error("API key missing")
             st.stop()
 
         genai.configure(api_key=api_key)
 
-        try:
-            with st.status("🚀 Agent starting...", expanded=True) as status:
+        with st.status("🚀 Agent working...", expanded=True) as status:
 
-                # Step 1: Save video temporarily
-                status.write("📥 Uploading video to vision engine...")
-                with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-                    temp_video.write(uploaded_file.getvalue())
-                    temp_video_path = temp_video.name
+            # ---------- Save video ----------
+            status.write("📥 Saving video...")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
+                temp.write(uploaded_video.read())
+                video_path = temp.name
 
-                video_file = genai.upload_file(path=temp_video_path)
+            # ---------- Extract frames ----------
+            status.write("🎞️ Extracting key frames...")
+            cap = cv2.VideoCapture(video_path)
+            frames = []
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
 
-                # Wait for processing
-                status.write("👀 Analyzing video frames...")
-                while video_file.state.name == "PROCESSING":
-                    time.sleep(2)
-                    video_file = genai.get_file(video_file.name)
+            frame_count = 0
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-                if video_file.state.name == "FAILED":
-                    status.update(
-                        label="❌ Video processing failed",
-                        state="error"
-                    )
-                    st.stop()
+                # Take 1 frame per second
+                if frame_count % fps == 0:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frames.append(Image.fromarray(frame_rgb))
 
-                # Step 2: Reasoning (FIXED MODEL)
-                status.write("🧠 Understanding UI behavior and bug patterns...")
+                frame_count += 1
+                if len(frames) >= 6:
+                    break
 
-                model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+            cap.release()
+            os.remove(video_path)
 
+            # ---------- Gemini Vision ----------
+            status.write("🧠 Analyzing UI behavior...")
+            model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
 
-                prompt = """
+            prompt = """
 You are a Senior QA Automation Engineer.
 
-Analyze the attached screen recording that shows a software bug.
+The images represent key UI states from a screen recording that contains a software bug.
 
-Generate a PROFESSIONAL, ENGINEERING-GRADE JIRA BUG REPORT.
-Use clear Markdown formatting.
+Generate a PROFESSIONAL JIRA BUG REPORT in Markdown.
 
 Structure:
-
 ## 🐛 Bug Report
-**Title:** <Concise technical summary>
-**Severity:** Critical / High / Medium / Low
+**Title:**
+**Severity:**
 
 ### 📝 Description
-Short explanation of the issue.
-
 ### 👣 Steps to Reproduce
-1. Step 1 observed in video
-2. Step 2 observed in video
-3. Step 3 observed in video
-
 ### 🔍 Technical Analysis
-- **Observed Behavior:** What happened
-- **Expected Behavior:** What should happen
-- **Potential Root Cause:** Educated guess based on visual evidence
-
----
-*Generated by Lazy QA Agent*
+- Observed Behavior
+- Expected Behavior
+- Potential Root Cause
 """
 
-                status.write("✍️ Drafting JIRA ticket...")
-                response = model.generate_content(
-                    [video_file, prompt]
-                )
+            response = model.generate_content([prompt, *frames])
 
-                # Cleanup
-                genai.delete_file(video_file.name)
-                try:
-                    os.remove(temp_video_path)
-                except:
-                    pass
+            status.update(label="✅ Done", state="complete")
 
-                status.update(
-                    label="✅ Analysis Complete!",
-                    state="complete",
-                    expanded=False
-                )
-
-            # Display result
-            with result_container.container():
-                st.markdown(
-                    '<div class="report-container">',
-                    unsafe_allow_html=True
-                )
-                st.markdown(response.text)
-                st.markdown("</div>", unsafe_allow_html=True)
-
-                st.code(response.text, language="markdown")
-
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-
-    if not uploaded_file:
-        st.info("👈 Upload a video to begin analysis")
+        st.markdown("### 📄 Generated JIRA Ticket")
+        st.markdown(response.text)
+        st.code(response.text, language="markdown")
