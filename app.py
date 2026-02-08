@@ -130,9 +130,8 @@ with col2:
                 # Step 2: Reasoning (FIXED MODEL)
                 status.write("🧠 Understanding UI behavior and bug patterns...")
 
-                model = genai.GenerativeModel(
-                    model_name="gemini-1.5-pro"
-                )
+                model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+
 
                 prompt = """
 You are a Senior QA Automation Engineer.
