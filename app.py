@@ -1,10 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
 import cv2
+import numpy as np
 import tempfile
 import os
-from PIL import Image
-import pytesseract
 
 # -------------------------------------------------
 # Page Config
@@ -33,6 +32,7 @@ with st.sidebar:
 col1, col2 = st.columns(2)
 
 with col1:
+    st.subheader("📹 Input Source")
     uploaded_video = st.file_uploader(
         "Upload Screen Recording",
         type=["mp4", "mov", "avi"]
@@ -45,7 +45,7 @@ with col2:
 
     if uploaded_video and st.button("Generate JIRA Ticket ✨"):
         if not api_key:
-            st.error("API key required")
+            st.error("Please provide a Google API key.")
             st.stop()
 
         genai.configure(api_key=api_key)
@@ -53,68 +53,85 @@ with col2:
         try:
             with st.status("🚀 Agent working...", expanded=True) as status:
 
-                # Save video
+                # -----------------------------
+                # Save video temporarily
+                # -----------------------------
                 status.write("📥 Saving video...")
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
                     tmp.write(uploaded_video.read())
                     video_path = tmp.name
 
-                # Extract frames
-                status.write("🎞️ Extracting frames...")
+                # -----------------------------
+                # Analyze frame changes
+                # -----------------------------
+                status.write("🎞️ Detecting UI behavior patterns...")
                 cap = cv2.VideoCapture(video_path)
-                fps = int(cap.get(cv2.CAP_PROP_FPS)) or 1
 
-                ui_observations = []
-                frame_index = 0
+                prev_gray = None
+                significant_events = []
+                frame_count = 0
 
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret:
                         break
 
-                    if frame_index % fps == 0:
-                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        text = pytesseract.image_to_string(gray)
-                        if text.strip():
-                            ui_observations.append(text.strip())
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                    frame_index += 1
-                    if len(ui_observations) >= 6:
+                    if prev_gray is not None:
+                        diff = cv2.absdiff(prev_gray, gray)
+                        change_score = np.mean(diff)
+
+                        if change_score > 12:
+                            significant_events.append(
+                                f"UI change detected around frame {frame_count}"
+                            )
+
+                    prev_gray = gray
+                    frame_count += 1
+
+                    if len(significant_events) >= 6:
                         break
 
                 cap.release()
                 os.remove(video_path)
 
-                if not ui_observations:
-                    ui_observations.append(
-                        "User interacts with UI but unexpected behavior occurs."
+                if not significant_events:
+                    significant_events.append(
+                        "User interacts with the UI, but the screen shows no meaningful response."
                     )
 
+                # -----------------------------
                 # Gemini TEXT model (always available)
-                status.write("🧠 Reasoning about bug...")
+                # -----------------------------
+                status.write("🧠 Generating engineering-grade bug report...")
                 model = genai.GenerativeModel("gemini-pro")
 
                 prompt = f"""
 You are a Senior QA Automation Engineer.
 
-Based on the following UI observations extracted from a screen recording,
-generate a PROFESSIONAL JIRA BUG REPORT.
+Based on the following UI behavior observations extracted
+from a screen recording, generate a PROFESSIONAL JIRA BUG REPORT.
 
 UI Observations:
-{chr(10).join(ui_observations)}
+{chr(10).join(significant_events)}
 
 Structure:
 
 ## 🐛 Bug Report
-**Title:**
-**Severity:**
+**Title:** Clear and concise technical summary
+**Severity:** Critical / High / Medium / Low
 
 ### 📝 Description
+Summarize the issue based on UI behavior.
+
 ### 👣 Steps to Reproduce
+Write realistic, user-action-based steps.
+
 ### 🔍 Technical Analysis
-- Observed Behavior
-- Expected Behavior
-- Potential Root Cause
+- **Observed Behavior**
+- **Expected Behavior**
+- **Potential Root Cause** (educated guess)
 """
 
                 response = model.generate_content(prompt)
@@ -130,5 +147,5 @@ Structure:
             st.code(response.text, language="markdown")
 
         except Exception as e:
-            st.error("Unexpected error")
+            st.error("Unexpected error occurred")
             st.exception(e)
