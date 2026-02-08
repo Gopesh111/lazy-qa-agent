@@ -4,22 +4,22 @@ import cv2
 import tempfile
 import os
 from PIL import Image
+import pytesseract
 
 # -------------------------------------------------
-# 1. Page Configuration
+# Page Config
 # -------------------------------------------------
 st.set_page_config(
     page_title="Lazy QA | AI Bug Reporter",
     page_icon="🐞",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
 st.markdown("## 🐞 The Lazy QA Agent")
-st.caption("Automated bug reporting powered by multimodal AI")
+st.caption("Automated bug reporting powered by AI reasoning")
 
 # -------------------------------------------------
-# 2. Sidebar (API Key)
+# Sidebar
 # -------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -28,12 +28,11 @@ with st.sidebar:
     )
 
 # -------------------------------------------------
-# 3. UI Layout
+# UI
 # -------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📹 Input Source")
     uploaded_video = st.file_uploader(
         "Upload Screen Recording",
         type=["mp4", "mov", "avi"]
@@ -46,7 +45,7 @@ with col2:
 
     if uploaded_video and st.button("Generate JIRA Ticket ✨"):
         if not api_key:
-            st.error("Please provide a Google API key.")
+            st.error("API key required")
             st.stop()
 
         genai.configure(api_key=api_key)
@@ -54,86 +53,71 @@ with col2:
         try:
             with st.status("🚀 Agent working...", expanded=True) as status:
 
-                # -----------------------------------------
-                # Save video temporarily
-                # -----------------------------------------
+                # Save video
                 status.write("📥 Saving video...")
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
                     tmp.write(uploaded_video.read())
                     video_path = tmp.name
 
-                # -----------------------------------------
-                # Extract key frames (1 frame per second)
-                # -----------------------------------------
-                status.write("🎞️ Extracting key frames...")
+                # Extract frames
+                status.write("🎞️ Extracting frames...")
                 cap = cv2.VideoCapture(video_path)
                 fps = int(cap.get(cv2.CAP_PROP_FPS)) or 1
-                frames = []
 
+                ui_observations = []
                 frame_index = 0
+
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret:
                         break
 
                     if frame_index % fps == 0:
-                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        frames.append(Image.fromarray(rgb))
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        text = pytesseract.image_to_string(gray)
+                        if text.strip():
+                            ui_observations.append(text.strip())
 
                     frame_index += 1
-                    if len(frames) >= 6:
+                    if len(ui_observations) >= 6:
                         break
 
                 cap.release()
                 os.remove(video_path)
 
-                if not frames:
-                    st.error("No frames could be extracted from the video.")
-                    st.stop()
+                if not ui_observations:
+                    ui_observations.append(
+                        "User interacts with UI but unexpected behavior occurs."
+                    )
 
-                # -----------------------------------------
-                # Gemini Vision (CORRECT MODEL)
-                # -----------------------------------------
-                status.write("🧠 Analyzing UI behavior and bug patterns...")
-                model = genai.GenerativeModel(
-                    "models/gemini-1.0-pro-vision"
-                )
+                # Gemini TEXT model (always available)
+                status.write("🧠 Reasoning about bug...")
+                model = genai.GenerativeModel("gemini-pro")
 
-                prompt = """
+                prompt = f"""
 You are a Senior QA Automation Engineer.
 
-The images represent key UI states from a screen recording
-that demonstrates a software bug.
+Based on the following UI observations extracted from a screen recording,
+generate a PROFESSIONAL JIRA BUG REPORT.
 
-Generate a PROFESSIONAL, ENGINEERING-GRADE JIRA BUG REPORT
-in Markdown format.
+UI Observations:
+{chr(10).join(ui_observations)}
 
 Structure:
 
 ## 🐛 Bug Report
-**Title:** Concise technical title
-**Severity:** Critical / High / Medium / Low
+**Title:**
+**Severity:**
 
 ### 📝 Description
-Brief explanation of the issue.
-
 ### 👣 Steps to Reproduce
-1. Step 1 observed in UI
-2. Step 2 observed in UI
-3. Step 3 observed in UI
-
 ### 🔍 Technical Analysis
-- **Observed Behavior**
-- **Expected Behavior**
-- **Potential Root Cause**
-
----
-*Generated by Lazy QA Agent*
+- Observed Behavior
+- Expected Behavior
+- Potential Root Cause
 """
 
-                response = model.generate_content(
-                    [prompt, *frames]
-                )
+                response = model.generate_content(prompt)
 
                 status.update(
                     label="✅ Analysis complete",
@@ -141,13 +125,10 @@ Brief explanation of the issue.
                     expanded=False
                 )
 
-            # -----------------------------------------
-            # Display Result
-            # -----------------------------------------
             st.markdown("### 📄 Generated JIRA Ticket")
             st.markdown(response.text)
             st.code(response.text, language="markdown")
 
         except Exception as e:
-            st.error("An unexpected error occurred.")
+            st.error("Unexpected error")
             st.exception(e)
