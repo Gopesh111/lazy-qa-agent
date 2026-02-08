@@ -1,13 +1,11 @@
 import streamlit as st
-import google.generativeai as genai
 import cv2
 import numpy as np
 import tempfile
 import os
+from openai import OpenAI
 
-# -------------------------------------------------
-# Page Config
-# -------------------------------------------------
+# ---------------- Page Config ----------------
 st.set_page_config(
     page_title="Lazy QA | AI Bug Reporter",
     page_icon="🐞",
@@ -17,22 +15,17 @@ st.set_page_config(
 st.markdown("## 🐞 The Lazy QA Agent")
 st.caption("Automated bug reporting powered by AI reasoning")
 
-# -------------------------------------------------
-# Sidebar
-# -------------------------------------------------
+# ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("⚙️ Configuration")
-    api_key = st.secrets.get("GOOGLE_API_KEY") or st.text_input(
-        "Google Gemini API Key", type="password"
+    api_key = st.secrets.get("OPENAI_API_KEY") or st.text_input(
+        "OpenAI API Key", type="password"
     )
 
-# -------------------------------------------------
-# UI
-# -------------------------------------------------
+# ---------------- UI ----------------
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📹 Input Source")
     uploaded_video = st.file_uploader(
         "Upload Screen Recording",
         type=["mp4", "mov", "avi"]
@@ -45,31 +38,27 @@ with col2:
 
     if uploaded_video and st.button("Generate JIRA Ticket ✨"):
         if not api_key:
-            st.error("Please provide a Google API key.")
+            st.error("OpenAI API key required")
             st.stop()
 
-        genai.configure(api_key=api_key)
+        client = OpenAI(api_key=api_key)
 
         try:
             with st.status("🚀 Agent working...", expanded=True) as status:
 
-                # -----------------------------
-                # Save video temporarily
-                # -----------------------------
+                # Save video
                 status.write("📥 Saving video...")
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
                     tmp.write(uploaded_video.read())
                     video_path = tmp.name
 
-                # -----------------------------
-                # Analyze frame changes
-                # -----------------------------
-                status.write("🎞️ Detecting UI behavior patterns...")
+                # Analyze frame differences
+                status.write("🎞️ Detecting UI behavior...")
                 cap = cv2.VideoCapture(video_path)
 
                 prev_gray = None
-                significant_events = []
-                frame_count = 0
+                events = []
+                frame_no = 0
 
                 while cap.isOpened():
                     ret, frame = cap.read()
@@ -80,61 +69,59 @@ with col2:
 
                     if prev_gray is not None:
                         diff = cv2.absdiff(prev_gray, gray)
-                        change_score = np.mean(diff)
+                        score = np.mean(diff)
 
-                        if change_score > 12:
-                            significant_events.append(
-                                f"UI change detected around frame {frame_count}"
+                        if score > 12:
+                            events.append(
+                                f"Significant UI change detected around frame {frame_no}"
                             )
 
                     prev_gray = gray
-                    frame_count += 1
+                    frame_no += 1
 
-                    if len(significant_events) >= 6:
+                    if len(events) >= 6:
                         break
 
                 cap.release()
                 os.remove(video_path)
 
-                if not significant_events:
-                    significant_events.append(
-                        "User interacts with the UI, but the screen shows no meaningful response."
+                if not events:
+                    events.append(
+                        "User interacts with the UI, but no visible response occurs."
                     )
 
-                # -----------------------------
-                # Gemini TEXT model (always available)
-                # -----------------------------
-                status.write("🧠 Generating engineering-grade bug report...")
-                model = genai.GenerativeModel("gemini-pro")
-
+                # LLM reasoning
+                status.write("🧠 Writing JIRA ticket...")
                 prompt = f"""
 You are a Senior QA Automation Engineer.
 
-Based on the following UI behavior observations extracted
-from a screen recording, generate a PROFESSIONAL JIRA BUG REPORT.
+Based on the following UI behavior observations from a screen recording,
+write a PROFESSIONAL JIRA BUG REPORT.
 
 UI Observations:
-{chr(10).join(significant_events)}
+{chr(10).join(events)}
 
 Structure:
 
 ## 🐛 Bug Report
-**Title:** Clear and concise technical summary
+**Title:** Concise technical summary
 **Severity:** Critical / High / Medium / Low
 
 ### 📝 Description
-Summarize the issue based on UI behavior.
-
 ### 👣 Steps to Reproduce
-Write realistic, user-action-based steps.
-
 ### 🔍 Technical Analysis
-- **Observed Behavior**
-- **Expected Behavior**
-- **Potential Root Cause** (educated guess)
+- Observed Behavior
+- Expected Behavior
+- Potential Root Cause
 """
 
-                response = model.generate_content(prompt)
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
+
+                result = response.choices[0].message.content
 
                 status.update(
                     label="✅ Analysis complete",
@@ -143,8 +130,8 @@ Write realistic, user-action-based steps.
                 )
 
             st.markdown("### 📄 Generated JIRA Ticket")
-            st.markdown(response.text)
-            st.code(response.text, language="markdown")
+            st.markdown(result)
+            st.code(result, language="markdown")
 
         except Exception as e:
             st.error("Unexpected error occurred")
