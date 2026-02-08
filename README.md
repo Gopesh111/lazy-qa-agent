@@ -7,7 +7,7 @@
 **Stop writing bug reports manually.** Lazy QA is an intelligent agent that watches screen recordings of software glitches and generates professional, engineering-grade JIRA tickets instantly.
 
 ## 🚀 Live Demo
-[Insert Your Streamlit Link Here]
+https://lazy-app-agent-dxar4w2tsegpcbxbpgxcmo.streamlit.app/
 
 ## ⚡ Key Features
 - **Multimodal Analysis:** Uses Google Gemini 1.5 Flash to "see" the bug in the video.
