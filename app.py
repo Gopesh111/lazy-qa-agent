@@ -119,7 +119,7 @@ with col2:
                         # Step 2: Reasoning
                         status.write("🧠 Identifying UI elements and error patterns...")
                         
-                        model = genai.GenerativeModel(model_name="gemini-1.5-flash-latest")
+                        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
                         
                         prompt = """
                         You are an expert QA Automation Engineer.
