@@ -1,0 +1,42 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerRegistryServiceConnection: 'your-service-connection'
+  imageRepository: 'the-lazy-qa-agent'
+  containerRegistry: 'your-registry.azurecr.io'
+  tag: '$(Build.BuildId)'
+
+stages:
+- stage: BuildAndTest
+  displayName: 'Build and Test Stage'
+  jobs:
+  - job: Test
+    displayName: 'Automated Testing'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.10'
+    - script: |
+        pip install -r requirements.txt
+        pytest tests/
+      displayName: 'Run Pytest Suite'
+
+  - job: DockerBuild
+    displayName: 'Docker Build and Push'
+    dependsOn: Test
+    condition: succeeded()
+    steps:
+    - task: Docker@2
+      displayName: 'Build and Push to ACR'
+      inputs:
+        command: 'buildAndPush'
+        repository: $(imageRepository)
+        dockerfile: '**/Dockerfile'
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest

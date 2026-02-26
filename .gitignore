@@ -1,0 +1,38 @@
+# --- Python Environment ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# --- Media & Session Data ---
+# Crucial for your "Asynchronous Ingestion" logic
+temp_media/
+temp_test_media/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# --- Environment & Security ---
+.env
+.env.local
+
+# --- Docker & DevOps ---
+.docker/
+# Ignore local build artifacts
+dist/
+build/
+*.egg-info/
+
+# --- Testing & Coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+tests/.pytest_cache/
+
+# --- IDE & OS ---
+.vscode/
+.idea/
+.DS_Store
